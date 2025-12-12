@@ -16,16 +16,35 @@ const app = express();
 // CORS configuration - allows your frontend domain(s)
 // Set FRONTEND_URL in Render environment variables for production (e.g., "https://yourdomain.com")
 // For multiple domains, separate with comma: "https://domain1.com,https://domain2.com"
+// Helper function to normalize URLs (remove trailing slashes for CORS matching)
+const normalizeOrigin = (url) => {
+  if (!url) return url;
+  return url.replace(/\/$/, ''); // Remove trailing slash
+};
+
 const corsOptions = {
   origin: function (origin, callback) {
-    // If FRONTEND_URL is set, use it; otherwise allow all origins
+    // Allow requests with no origin (mobile apps, curl, Postman, etc.)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    // Normalize the incoming origin (remove trailing slash)
+    const normalizedOrigin = normalizeOrigin(origin);
+
+    // If FRONTEND_URL is set, check against allowed origins
     if (process.env.FRONTEND_URL) {
-      const allowedOrigins = process.env.FRONTEND_URL.split(',').map(url => url.trim());
-      // Allow requests with no origin (mobile apps, curl, etc.)
-      if (!origin || allowedOrigins.includes(origin)) {
+      const allowedOrigins = process.env.FRONTEND_URL
+        .split(',')
+        .map(url => normalizeOrigin(url.trim())); // Normalize allowed origins too
+      
+      // Check if normalized origin is in allowed list
+      if (allowedOrigins.includes(normalizedOrigin)) {
         callback(null, true);
       } else {
-        callback(null, true); // Allow all for now - can restrict later
+        // For now, allow all origins to avoid deployment issues
+        // Can be restricted later by removing this fallback
+        callback(null, true);
       }
     } else {
       // Allow all origins if FRONTEND_URL is not set (for easier deployment)
