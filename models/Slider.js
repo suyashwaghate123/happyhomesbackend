@@ -54,3 +54,7 @@ module.exports = mongoose.model('Slider', sliderSchema);
 
 
 
+
+
+
+

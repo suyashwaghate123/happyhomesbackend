@@ -69,6 +69,9 @@ router.post('/inquiry', leadValidation, leadController.submitInquiry);
 // Submit appointment/visit request
 router.post('/appointment', appointmentValidation, leadController.submitAppointment);
 
+// Submit visit request (from VisitNowPopup - no email required)
+router.post('/visit-request', leadController.submitVisitRequest);
+
 // Contact form submission
 router.post('/contact', leadValidation, leadController.submitContactForm);
 

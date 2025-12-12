@@ -7,7 +7,7 @@
 const mongoose = require('mongoose');
 const { validationResult } = require('express-validator');
 const nodemailer = require('nodemailer');
-const { Lead } = require('../models');
+const { Lead, Visitor } = require('../models');
 
 // Helper to check if MongoDB is connected
 const isDBConnected = () => mongoose.connection.readyState === 1;
@@ -244,6 +244,90 @@ exports.submitAppointment = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Something went wrong. Please try again later.'
+    });
+  }
+};
+
+// Submit Visit Request (from VisitNowPopup)
+exports.submitVisitRequest = async (req, res) => {
+  try {
+    const { name, phone, service, visitDate, visitTime, email } = req.body;
+
+    // Basic validation
+    if (!name || !phone || !service || !visitDate || !visitTime) {
+      return res.status(400).json({
+        success: false,
+        message: 'All required fields must be provided'
+      });
+    }
+
+    const visitorData = {
+      name: name.trim(),
+      phone: phone.trim(),
+      service: service.trim(),
+      visitDate: new Date(visitDate),
+      visitTime: visitTime.trim(),
+      status: 'pending',
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent')
+    };
+
+    // Add email if provided
+    if (email && email.trim()) {
+      visitorData.email = email.trim().toLowerCase();
+    }
+
+    let savedVisitor;
+
+    if (isDBConnected()) {
+      // Save to MongoDB
+      savedVisitor = await Visitor.create(visitorData);
+      console.log('✅ Visitor saved to MongoDB:', savedVisitor._id);
+      console.log('📋 Visitor Details:', {
+        name: savedVisitor.name,
+        phone: savedVisitor.phone,
+        service: savedVisitor.service,
+        visitDate: savedVisitor.visitDate,
+        visitTime: savedVisitor.visitTime
+      });
+    } else {
+      // Fallback to in-memory (shouldn't happen if DB is configured)
+      savedVisitor = {
+        id: `VIS-${Date.now()}`,
+        ...visitorData,
+        createdAt: new Date().toISOString()
+      };
+      console.log('⚠️  MongoDB not connected - saved to memory:', savedVisitor.id);
+    }
+
+    // Send admin notification (async, don't wait)
+    const notificationData = {
+      name: savedVisitor.name,
+      email: savedVisitor.email || 'N/A',
+      phone: savedVisitor.phone,
+      serviceInterested: savedVisitor.service,
+      appointmentDate: savedVisitor.visitDate,
+      appointmentTime: savedVisitor.visitTime,
+      message: 'Visit request from website popup'
+    };
+    sendAdminNotification(notificationData, 'Visit Request');
+
+    res.status(201).json({
+      success: true,
+      message: 'Thank you! Your visit request has been submitted. We will contact you shortly to confirm.',
+      data: {
+        id: savedVisitor._id || savedVisitor.id,
+        name: savedVisitor.name,
+        visitDate: savedVisitor.visitDate
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error submitting visit request:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Something went wrong. Please try again later.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };

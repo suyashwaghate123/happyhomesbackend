@@ -13,6 +13,7 @@ const LivingOption = require('./LivingOption');
 const Statistic = require('./Statistic');
 const HomePopup = require('./HomePopup');
 const Lead = require('./Lead');
+const Visitor = require('./Visitor');
 
 module.exports = {
   SiteSettings,
@@ -28,8 +29,10 @@ module.exports = {
   LivingOption,
   Statistic,
   HomePopup,
-  Lead
+  Lead,
+  Visitor
 };
+
 
 
 
