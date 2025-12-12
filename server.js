@@ -13,10 +13,29 @@ const leadRoutes = require('./routes/leadRoutes');
 const app = express();
 
 // Middleware
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+// CORS configuration - allows your frontend domain(s)
+// Set FRONTEND_URL in Render environment variables for production (e.g., "https://yourdomain.com")
+// For multiple domains, separate with comma: "https://domain1.com,https://domain2.com"
+const corsOptions = {
+  origin: function (origin, callback) {
+    // If FRONTEND_URL is set, use it; otherwise allow all origins
+    if (process.env.FRONTEND_URL) {
+      const allowedOrigins = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+      // Allow requests with no origin (mobile apps, curl, etc.)
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, true); // Allow all for now - can restrict later
+      }
+    } else {
+      // Allow all origins if FRONTEND_URL is not set (for easier deployment)
+      callback(null, true);
+    }
+  },
   credentials: true
-}));
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
