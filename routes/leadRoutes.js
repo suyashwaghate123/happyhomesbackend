@@ -76,8 +76,14 @@ router.post('/visit-request', leadController.submitVisitRequest);
 router.post('/contact', leadValidation, leadController.submitContactForm);
 
 // Admission form routes
-router.post('/admission/step', leadController.submitAdmissionStep);
+// Add logging middleware for debugging
+router.post('/admission/step', (req, res, next) => {
+  console.log('🔵 POST /admission/step - Request received');
+  console.log('Request body:', JSON.stringify(req.body, null, 2));
+  next();
+}, leadController.submitAdmissionStep);
 router.post('/admission/complete', leadController.completeAdmission);
+router.get('/admission', leadController.getAllAdmissions); // Debug route to list all admissions (must come before :applicationId)
 router.get('/admission/:applicationId', leadController.getAdmissionApplication);
 
 // Admin routes (to be protected with auth middleware later)

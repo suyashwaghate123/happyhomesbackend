@@ -14,6 +14,7 @@ const Statistic = require('./Statistic');
 const HomePopup = require('./HomePopup');
 const Lead = require('./Lead');
 const Visitor = require('./Visitor');
+const Admission = require('./Admission');
 
 module.exports = {
   SiteSettings,
@@ -30,7 +31,8 @@ module.exports = {
   Statistic,
   HomePopup,
   Lead,
-  Visitor
+  Visitor,
+  Admission
 };
 
 

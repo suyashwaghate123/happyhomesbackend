@@ -7,7 +7,7 @@
 const mongoose = require('mongoose');
 const { validationResult } = require('express-validator');
 const nodemailer = require('nodemailer');
-const { Lead, Visitor } = require('../models');
+const { Lead, Visitor, Admission } = require('../models');
 
 // Helper to check if MongoDB is connected
 const isDBConnected = () => mongoose.connection.readyState === 1;
@@ -15,10 +15,6 @@ const isDBConnected = () => mongoose.connection.readyState === 1;
 // In-memory storage for leads (fallback when no DB)
 let leadsInMemory = [];
 let leadIdCounter = 1;
-
-// In-memory storage for admission applications
-let admissionApplications = [];
-let admissionIdCounter = 1;
 
 // Email transporter setup
 const createTransporter = () => {
@@ -395,39 +391,172 @@ exports.submitAdmissionStep = async (req, res) => {
   try {
     const { applicationId, step, data } = req.body;
     
-    let application;
+    // Log incoming request for debugging
+    console.log('📥 Admission step request received:', {
+      applicationId: applicationId || 'NEW',
+      step,
+      hasData: !!data,
+      dataKeys: data ? Object.keys(data) : [],
+      dbConnected: isDBConnected()
+    });
     
-    if (applicationId) {
-      // Find existing application
-      application = admissionApplications.find(app => app.applicationId === applicationId);
-      if (!application) {
-        return res.status(404).json({
-          success: false,
-          message: 'Application not found'
-        });
-      }
-      // Update with new step data
-      application.steps[`step${step}`] = data;
-      application.currentStep = step;
-      application.updatedAt = new Date().toISOString();
-    } else {
-      // Create new application
-      const newApplicationId = 'HH' + Date.now().toString().slice(-8);
-      application = {
-        id: admissionIdCounter++,
-        applicationId: newApplicationId,
-        currentStep: step,
-        status: 'in_progress',
-        steps: {
-          [`step${step}`]: data
-        },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      admissionApplications.push(application);
+    if (!step || !data) {
+      console.log('❌ Missing required fields:', { step, hasData: !!data });
+      return res.status(400).json({
+        success: false,
+        message: 'Step number and data are required'
+      });
     }
     
-    console.log('Admission form step saved:', { applicationId: application.applicationId, step });
+    let application;
+    
+    if (isDBConnected()) {
+      // Save to MongoDB
+      if (applicationId) {
+        // Find existing application
+        application = await Admission.findOne({ applicationId });
+        if (!application) {
+          return res.status(404).json({
+            success: false,
+            message: 'Application not found'
+          });
+        }
+        
+        // Update with new step data based on step number
+        switch (step) {
+          case 1:
+            // Convert dateOfBirth string to Date object if present
+            if (data.dateOfBirth && typeof data.dateOfBirth === 'string') {
+              data.dateOfBirth = new Date(data.dateOfBirth);
+            }
+            application.basicInfo = { ...application.basicInfo, ...data };
+            break;
+          case 2:
+            application.addressDetails = { ...application.addressDetails, ...data };
+            break;
+          case 3:
+            application.referenceDetails = { ...application.referenceDetails, ...data };
+            break;
+          case 4:
+            application.medicalInfo = { ...application.medicalInfo, ...data };
+            break;
+          case 5:
+            // Handle nested healthAssessment structure from frontend
+            const healthData = data.healthAssessment || data;
+            application.healthAssessment = { ...application.healthAssessment, ...healthData };
+            break;
+          case 6:
+            application.guardianInfo = { ...application.guardianInfo, ...data };
+            break;
+          default:
+            return res.status(400).json({
+              success: false,
+              message: 'Invalid step number'
+            });
+        }
+        
+        application.currentStep = step;
+        application.status = 'in_progress';
+        await application.save();
+      } else {
+        // Create new application
+        const admissionData = {
+          currentStep: step,
+          status: 'in_progress',
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent')
+        };
+        
+        // Set step-specific data
+        switch (step) {
+          case 1:
+            // Convert dateOfBirth string to Date object if present
+            if (data.dateOfBirth && typeof data.dateOfBirth === 'string') {
+              data.dateOfBirth = new Date(data.dateOfBirth);
+            }
+            // Clean up empty strings for optional fields
+            const cleanedBasicInfo = {};
+            Object.keys(data).forEach(key => {
+              if (data[key] !== '' && data[key] !== null && data[key] !== undefined) {
+                cleanedBasicInfo[key] = data[key];
+              }
+            });
+            admissionData.basicInfo = cleanedBasicInfo;
+            break;
+          case 2:
+            admissionData.addressDetails = data;
+            break;
+          case 3:
+            admissionData.referenceDetails = data;
+            break;
+          case 4:
+            admissionData.medicalInfo = data;
+            break;
+          case 5:
+            // Handle nested healthAssessment structure from frontend
+            admissionData.healthAssessment = data.healthAssessment || data;
+            break;
+          case 6:
+            admissionData.guardianInfo = data;
+            break;
+          default:
+            return res.status(400).json({
+              success: false,
+              message: 'Invalid step number'
+            });
+        }
+        
+        try {
+          console.log('📝 Attempting to create admission with data:', {
+            step,
+            basicInfo: admissionData.basicInfo ? Object.keys(admissionData.basicInfo) : 'N/A',
+            addressDetails: admissionData.addressDetails ? 'Present' : 'N/A',
+            referenceDetails: admissionData.referenceDetails ? 'Present' : 'N/A',
+            medicalInfo: admissionData.medicalInfo ? 'Present' : 'N/A',
+            healthAssessment: admissionData.healthAssessment ? 'Present' : 'N/A',
+            guardianInfo: admissionData.guardianInfo ? 'Present' : 'N/A'
+          });
+          
+          application = await Admission.create(admissionData);
+          console.log('✅ New admission created in MongoDB:', { 
+            applicationId: application.applicationId, 
+            step,
+            _id: application._id,
+            collection: 'admissions',
+            database: mongoose.connection.name
+          });
+        } catch (createError) {
+          console.error('❌ Error creating admission:', createError);
+          console.error('❌ Error details:', {
+            name: createError.name,
+            message: createError.message,
+            errors: createError.errors ? Object.keys(createError.errors) : 'N/A'
+          });
+          if (createError.errors) {
+            Object.keys(createError.errors).forEach(key => {
+              console.error(`  - ${key}: ${createError.errors[key].message}`);
+            });
+          }
+          throw createError;
+        }
+      }
+      
+      if (application) {
+        console.log('✅ Admission form step saved to MongoDB:', { 
+          applicationId: application.applicationId, 
+          step,
+          _id: application._id,
+          database: mongoose.connection.name,
+          collection: 'admissions'
+        });
+      }
+    } else {
+      // Fallback to in-memory storage (shouldn't happen if DB is configured)
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected. Please configure MongoDB.'
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -438,13 +567,31 @@ exports.submitAdmissionStep = async (req, res) => {
       }
     });
 
-  } catch (error) {
-    console.error('Error saving admission step:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Something went wrong. Please try again later.'
-    });
-  }
+    } catch (error) {
+      console.error('❌ Error saving admission step:', error);
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+      
+      // Check if it's a validation error
+      if (error.name === 'ValidationError') {
+        const validationErrors = Object.values(error.errors).map(err => err.message);
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validationErrors,
+          error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+      }
+      
+      res.status(500).json({
+        success: false,
+        message: 'Something went wrong. Please try again later.',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
 };
 
 // Complete Admission Form
@@ -452,7 +599,22 @@ exports.completeAdmission = async (req, res) => {
   try {
     const { applicationId } = req.body;
     
-    const application = admissionApplications.find(app => app.applicationId === applicationId);
+    if (!applicationId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Application ID is required'
+      });
+    }
+    
+    if (!isDBConnected()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected. Please configure MongoDB.'
+      });
+    }
+    
+    // Find application in database
+    const application = await Admission.findOne({ applicationId });
     if (!application) {
       return res.status(404).json({
         success: false,
@@ -462,14 +624,14 @@ exports.completeAdmission = async (req, res) => {
     
     // Mark as completed
     application.status = 'completed';
-    application.completedAt = new Date().toISOString();
-    application.updatedAt = new Date().toISOString();
+    application.completedAt = new Date();
+    await application.save();
     
-    console.log('Admission form completed:', applicationId);
+    console.log('✅ Admission form completed:', applicationId);
     
     // Create a lead entry for the admission
-    const applicantData = application.steps.step1 || {};
-    const guardianData = application.steps.step6 || {};
+    const applicantData = application.basicInfo || {};
+    const guardianData = application.guardianInfo || {};
     
     const leadData = {
       name: `${applicantData.firstName || ''} ${applicantData.lastName || ''}`.trim() || 'Unknown',
@@ -478,13 +640,15 @@ exports.completeAdmission = async (req, res) => {
       message: `Admission application submitted. Application ID: ${applicationId}`,
       source: 'other',
       status: 'new',
-      priority: 'high'
+      priority: 'high',
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent')
     };
 
-    if (isDBConnected()) {
-      await Lead.create(leadData);
-    }
+    // Save lead to database
+    await Lead.create(leadData);
     
+    // Send admin notification
     sendAdminNotification(leadData, 'Admission Application');
     
     res.status(200).json({
@@ -497,10 +661,59 @@ exports.completeAdmission = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error completing admission:', error);
+    console.error('❌ Error completing admission:', error);
     res.status(500).json({
       success: false,
-      message: 'Something went wrong. Please try again later.'
+      message: 'Something went wrong. Please try again later.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// Get all admissions (for admin/debugging)
+exports.getAllAdmissions = async (req, res) => {
+  try {
+    if (!isDBConnected()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected. Please configure MongoDB.'
+      });
+    }
+    
+    const { status, page = 1, limit = 20 } = req.query;
+    const query = {};
+    if (status) query.status = status;
+
+    const admissions = await Admission.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .select('-__v'); // Exclude version key
+
+    const total = await Admission.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: admissions,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      },
+      database: {
+        name: mongoose.connection.name,
+        host: mongoose.connection.host,
+        collection: 'admissions'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching admissions:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Something went wrong. Please try again later.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
@@ -510,7 +723,14 @@ exports.getAdmissionApplication = async (req, res) => {
   try {
     const { applicationId } = req.params;
     
-    const application = admissionApplications.find(app => app.applicationId === applicationId);
+    if (!isDBConnected()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not connected. Please configure MongoDB.'
+      });
+    }
+    
+    const application = await Admission.findOne({ applicationId });
     if (!application) {
       return res.status(404).json({
         success: false,
@@ -524,10 +744,11 @@ exports.getAdmissionApplication = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching admission:', error);
+    console.error('❌ Error fetching admission:', error);
     res.status(500).json({
       success: false,
-      message: 'Something went wrong. Please try again later.'
+      message: 'Something went wrong. Please try again later.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
