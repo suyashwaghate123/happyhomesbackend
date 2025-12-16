@@ -216,3 +216,4 @@ admissionSchema.pre('save', async function(next) {
 
 module.exports = mongoose.model('Admission', admissionSchema);
 
+
